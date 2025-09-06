@@ -1,0 +1,53 @@
+name: Build and Deploy to Databricks
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # allow manual trigger
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build Docker image
+        run: docker build -t ghcr.io/${{ github.repository }}/custom-dbx:latest .
+
+      - name: Push Docker image
+        run: docker push ghcr.io/${{ github.repository }}/custom-dbx:latest
+
+  update-databricks-cluster:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Install Databricks CLI
+        run: pip install databricks-cli
+
+      - name: Configure Databricks CLI
+        run: |
+          mkdir -p ~/.databricks
+          cat <<EOF > ~/.databricks/config
+          [DEFAULT]
+          host = ${{ secrets.DATABRICKS_HOST }}
+          token = ${{ secrets.DATABRICKS_TOKEN }}
+          EOF
+
+      - name: Update Databricks cluster with new Docker image
+        run: |
+          databricks clusters edit --json '{
+            "cluster_id": "${{ secrets.DATABRICKS_CLUSTER_ID }}",
+            "docker_image": {
+              "url": "ghcr.io/${{ github.repository }}/custom-dbx:latest",
+              "basic_auth": {
+                "username": "oauth2",
+                "password": "${{ secrets.GHCR_PAT }}"
+              }
+            }
+          }'
