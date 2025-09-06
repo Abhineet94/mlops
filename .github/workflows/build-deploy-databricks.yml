@@ -1,11 +1,13 @@
-- name: Build Docker image
-  run: |
-    IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}/custom-dbx:latest
-    docker build -t $IMAGE_NAME .
-    echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+name: Build and Deploy to Databricks
 
-- name: Push Docker image
-  run: docker push $IMAGE_NAME
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # allow manual trigger
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -15,10 +17,13 @@
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Build Docker image
-        run: docker build -t ghcr.io/${{ github.repository }}/custom-dbx:latest .
+        run: |
+          IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}/custom-dbx:latest
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          docker build -t $IMAGE_NAME .
 
       - name: Push Docker image
-        run: docker push ghcr.io/${{ github.repository }}/custom-dbx:latest
+        run: docker push $IMAGE_NAME
 
   update-databricks-cluster:
     runs-on: ubuntu-latest
@@ -39,13 +44,13 @@
 
       - name: Update Databricks cluster with new Docker image
         run: |
-          databricks clusters edit --json '{
-            "cluster_id": "${{ secrets.DATABRICKS_CLUSTER_ID }}",
-            "docker_image": {
-              "url": "ghcr.io/${{ github.repository }}/custom-dbx:latest",
-              "basic_auth": {
-                "username": "oauth2",
-                "password": "${{ secrets.GHCR_PAT }}"
+          databricks clusters edit --json "{
+            \"cluster_id\": \"${{ secrets.DATABRICKS_CLUSTER_ID }}\",
+            \"docker_image\": {
+              \"url\": \"${IMAGE_NAME}\",
+              \"basic_auth\": {
+                \"username\": \"oauth2\",
+                \"password\": \"${{ secrets.GHCR_PAT }}\"
               }
             }
-          }'
+          }"
